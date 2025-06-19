@@ -1,0 +1,196 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+    
+    function getUserRole() {
+      return getUserData().role;
+    }
+    
+    function getUserCompanyId() {
+      return getUserData().companyID;
+    }
+    
+    function isMainAdmin() {
+      return getUserRole() == 'MainAdmin';
+    }
+
+    function isAdmin() {
+      return getUserRole() == 'Admin';
+    }
+
+    function isSupervisor() {
+      return getUserRole() == 'Supervisor';
+    }
+
+    function isOperator() {
+      return getUserRole() == 'Operator';
+    }
+
+    function isAccountant() {
+      return getUserRole() == 'Accountant';
+    }
+    
+    function belongsToSameCompany(companyId) {
+      return getUserCompanyId() == companyId;
+    }
+    
+    function isOwnerOrAdmin(userId) {
+      return request.auth.uid == userId || isAdmin() || isMainAdmin();
+    }
+
+    // Companies collection
+    match /companies/{companyId} {
+      allow read: if isAuthenticated() && (isMainAdmin() || isAdmin());
+      allow create: if isAuthenticated() && isMainAdmin();
+      allow update: if isAuthenticated() && isMainAdmin();
+      allow delete: if isAuthenticated() && isMainAdmin();
+    }
+
+    // Users collection
+    match /users/{userId} {
+      allow read: if isAuthenticated() && (
+        request.auth.uid == userId ||
+        isMainAdmin() ||
+        (isAdmin() && belongsToSameCompany(resource.data.companyID))
+      );
+      allow create: if isAuthenticated() && (
+        request.auth.uid == userId ||
+        isMainAdmin()
+      );
+      allow update: if isAuthenticated() && (
+        request.auth.uid == userId ||
+        isMainAdmin() ||
+        (isAdmin() && belongsToSameCompany(resource.data.companyID))
+      );
+      allow delete: if isAuthenticated() && (
+        isMainAdmin() ||
+        (isAdmin() && belongsToSameCompany(resource.data.companyID))
+      );
+    }
+
+    // Vehicles collection
+    match /vehicles/{vehicleId} {
+      allow read: if isAuthenticated() && (
+        isMainAdmin() ||
+        belongsToSameCompany(resource.data.companyID)
+      );
+      allow create: if isAuthenticated() && (
+        isMainAdmin() ||
+        ((isAdmin() || isOperator()) &&
+         belongsToSameCompany(request.resource.data.companyID) &&
+         request.resource.data.companyID == getUserCompanyId())
+      );
+      allow update: if isAuthenticated() && (
+        isMainAdmin() ||
+        ((isAdmin() || isOperator()) &&
+         belongsToSameCompany(resource.data.companyID) &&
+         resource.data.companyID == getUserCompanyId())
+      );
+      allow delete: if isAuthenticated() && (
+        isMainAdmin() ||
+        (isAdmin() &&
+         belongsToSameCompany(resource.data.companyID) &&
+         resource.data.companyID == getUserCompanyId())
+      );
+    }
+
+    // Drivers collection
+    match /drivers/{driverId} {
+      allow read: if isAuthenticated() && (isMainAdmin() || belongsToSameCompany(resource.data.companyID));
+      allow create: if isAuthenticated() && (isMainAdmin() || ((isAdmin() || isOperator()) && belongsToSameCompany(request.resource.data.companyID)));
+      allow update: if isAuthenticated() && (isMainAdmin() || ((isAdmin() || isOperator()) && belongsToSameCompany(resource.data.companyID)));
+      allow delete: if isAuthenticated() && (isMainAdmin() || (isAdmin() && belongsToSameCompany(resource.data.companyID)));
+    }
+
+    // Fuel requests collection
+    match /fuel_requests/{requestId} {
+      allow read: if isAuthenticated() && (
+        isMainAdmin() ||
+        (belongsToSameCompany(resource.data.companyID) &&
+         resource.data.companyID == getUserCompanyId() &&
+         (isAdmin() || isSupervisor() || isOperator() || isAccountant() || request.auth.uid == resource.data.requestedBy))
+      );
+      allow create: if isAuthenticated() && (
+        isMainAdmin() ||
+        ((isOperator() || isAdmin()) &&
+         belongsToSameCompany(request.resource.data.companyID) &&
+         request.resource.data.companyID == getUserCompanyId())
+      );
+      allow update: if isAuthenticated() && (
+        isMainAdmin() ||
+        (request.auth.uid == resource.data.requestedBy &&
+         resource.data.status == 'pending' &&
+         resource.data.companyID == getUserCompanyId()) ||
+        (isAccountant() &&
+         belongsToSameCompany(resource.data.companyID) &&
+         resource.data.companyID == getUserCompanyId()) ||
+        (isAdmin() &&
+         belongsToSameCompany(resource.data.companyID) &&
+         resource.data.companyID == getUserCompanyId())
+      );
+      allow delete: if isAuthenticated() && (
+        isMainAdmin() ||
+        (isAdmin() &&
+         belongsToSameCompany(resource.data.companyID) &&
+         resource.data.companyID == getUserCompanyId())
+      );
+    }
+
+    // Approvals collection
+    match /approvals/{approvalId} {
+      allow read: if isAuthenticated() && belongsToSameCompany(resource.data.companyID);
+      allow create: if isAuthenticated() && (isAccountant() || isAdmin()) && belongsToSameCompany(request.resource.data.companyID);
+      allow update: if isAuthenticated() && (isAccountant() || isAdmin()) && belongsToSameCompany(resource.data.companyID);
+      allow delete: if isAuthenticated() && isAdmin() && belongsToSameCompany(resource.data.companyID);
+    }
+
+    // Fuel dispenses collection
+    match /fuel_dispenses/{dispenseId} {
+      allow read: if isAuthenticated() && belongsToSameCompany(resource.data.companyID);
+      allow create: if isAuthenticated() && (isOperator() || isAdmin()) && belongsToSameCompany(request.resource.data.companyID);
+      allow update: if isAuthenticated() && (isOperator() || isAdmin()) && belongsToSameCompany(resource.data.companyID);
+      allow delete: if isAuthenticated() && isAdmin() && belongsToSameCompany(resource.data.companyID);
+    }
+
+    // Notifications collection
+    match /notifications/{notificationId} {
+      allow read: if isAuthenticated() && (
+        request.auth.uid == resource.data.userId ||
+        (isAdmin() && belongsToSameCompany(resource.data.companyID))
+      );
+      allow create: if isAuthenticated() && belongsToSameCompany(request.resource.data.companyID);
+      allow update: if isAuthenticated() && (
+        request.auth.uid == resource.data.userId ||
+        (isAdmin() && belongsToSameCompany(resource.data.companyID))
+      );
+      allow delete: if isAuthenticated() && (
+        request.auth.uid == resource.data.userId ||
+        (isAdmin() && belongsToSameCompany(resource.data.companyID))
+      );
+    }
+
+    // Subscriptions collection
+    match /subscriptions/{subscriptionId} {
+      allow read: if isAuthenticated() && (isMainAdmin() || ((isAdmin() || isAccountant()) && belongsToSameCompany(resource.data.companyID)));
+      allow create: if isAuthenticated() && (isMainAdmin() || (isAdmin() && belongsToSameCompany(request.resource.data.companyID)));
+      allow update: if isAuthenticated() && (isMainAdmin() || (isAdmin() && belongsToSameCompany(resource.data.companyID)));
+      allow delete: if isAuthenticated() && (isMainAdmin() || (isAdmin() && belongsToSameCompany(resource.data.companyID)));
+    }
+
+    // Audit logs collection
+    match /audit_logs/{logId} {
+      allow read: if isAuthenticated() && (isMainAdmin() || ((isAdmin() || isAccountant()) && belongsToSameCompany(resource.data.companyID)));
+      allow create: if isAuthenticated() && (isMainAdmin() || belongsToSameCompany(request.resource.data.companyID));
+      // Audit logs should not be updated or deleted for integrity
+      allow update, delete: if false;
+    }
+  }
+}
